@@ -1,0 +1,190 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Teo Lye Choon"
+date: "Saturday, July 18, 2015"
+output: html_document
+---
+
+## Background  
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible 
+to collect a large amount of data about personal activity relatively 
+inexpensively. These type of devices are part of the quantified self movement - 
+a group of enthusiasts who take measurements about themselves regularly to 
+improve their health, to find patterns in their behavior, or because they are 
+tech geeks. One thing that people regularly do is quantify how much of a 
+particular activity they do, but they rarely quantify how well they do it. In 
+this project, the goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+## Loading the necessary libraries 
+
+```{r}
+library(ggplot2)
+library(lattice)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+```
+
+## Downloading the Data
+
+```{r}
+trainUrl <-"http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testUrl <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainFile <- "pml-training.csv"
+testFile  <- "pml-testing.csv"
+if (!file.exists(trainFile)) {
+  download.file(trainUrl, trainFile)
+}
+if (!file.exists(testFile)) {
+  download.file(testUrl, testFile)
+}
+```  
+
+## Reading the Data
+
+The two csv files will be read with all blank(''), '#DIV/0' and 'NA' values converted to 'NA'.
+
+```{r}
+trainRaw <- read.csv("pml-training.csv", na.strings=c("NA","#DIV/0!", ""))
+testRaw <- read.csv("pml-testing.csv", na.strings=c("NA","#DIV/0!", ""))
+```
+
+## Exploring the Data
+
+```{r}
+dim(trainRaw)
+dim(testRaw)
+```
+
+## Cleaning the Data
+
+* Remove variables with more than 80% missing values since these variables will not contribute much to the prediction.       
+
+```{r}
+# Training Data
+trainNA <- sapply(colnames(trainRaw), 
+              function(x) 
+                if (sum(is.na(trainRaw[ ,x])) > 0.8 * nrow(trainRaw)) 
+                    {return(T)}
+                else {return(F)}
+              )
+trainNoNA <- trainRaw[ ,!trainNA]
+dim(trainNoNA)
+
+# Test Data
+testNA <- sapply(colnames(testRaw), 
+              function(x) 
+                if (sum(is.na(testRaw[ ,x])) > 0.8 * nrow(testRaw)) 
+                    {return(T)}
+                else {return(F)}
+              )
+testNoNA <- testRaw[ ,!testNA]
+dim(testNoNA)
+```
+
+Some columns that do not contribute much to the accelerometer measurements are also removed.
+
+```{r}
+# Train Data
+classe <- trainNoNA$classe
+remove = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 
+           'cvtd_timestamp', 'new_window', 'num_window')
+trainRemove <- trainNoNA[, -which(names(trainNoNA) %in% remove)]
+trainClean <- trainRemove[ ,sapply(trainRemove, is.numeric)]
+trainClean$classe <- classe
+dim(trainClean)
+
+# Test Data
+testRemove <- testNoNA[, -which(names(trainNoNA) %in% remove)]
+testClean <- testRemove[ ,sapply(testRemove, is.numeric)]
+dim(testClean)
+```
+
+## Slicing the data
+
+The clean training data will be splited into a training data (70%) and a validation data (30%). The validation data will be used for cross validation.
+
+```{r}
+set.seed(180715) 
+inTrain <- createDataPartition(y=trainClean$classe, p=0.70, list=FALSE)
+trainData <- trainClean[inTrain, ]
+ValidationData <- trainClean[-inTrain, ]
+```
+
+## Data Modeling
+
+A predictive model with Random Forest algorithm will be used as it automatically selects the important variables and is robust enough to correlate covariates & outliers in general. The 5-fold cross validation will be used when applying the 
+algorithm.
+
+```{r}
+controlRf <- trainControl(method="cv", 5)
+modelRf <- train(classe ~ ., data=trainData, method="rf", trControl=controlRf,
+                 ntree=25)
+modelRf
+```
+
+The performance of the model will be assessed using the validation data.
+
+```{r}
+predictRf <- predict(modelRf, ValidationData)
+confusionMatrix(ValidationData$classe, predictRf)
+
+accuracy <- postResample(predictRf, ValidationData$classe)
+accuracy
+outSampleError <- 1 - as.numeric(confusionMatrix(ValidationData$classe, 
+                                                 predictRf)$overall[1])
+outSampleError
+```
+
+## Predicting for Test Data
+
+The model will be used on the original testing data with the 'problem_id` 
+removed.
+
+```{r}
+result <- predict(modelRf, testClean[, -length(names(testClean))])
+result
+```  
+
+## Conclusion
+
+The random forest model has a good accuracy but caution must be taken from Overfitting.
+
+## Appendix 1 : Correlation Matrix Visualization
+
+```{r}
+corrPlot <- cor(trainData[ ,-length(names(trainData))])
+corrplot(corrPlot, method="color")
+```
+
+## Appendix 2 : Decision Tree Visualization
+
+```{r}
+treeModel <- rpart(classe ~ . ,data=trainData, method="class")
+prp(treeModel)
+```
+
+## Appendix 3 : Assignment Submission
+
+```{r}
+pml_write_files = function(x){
+    n = length(x)
+    for(i in 1:n){
+        filename = paste0("problem_id_",i,".txt")
+        write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,
+                    col.names=FALSE)
+    }
+}
+
+pml_write_files(result)
+```
+
+## Appendix 4 : References
+
+* The information used for this project is referenced from the Human Activity Recognition publication. 
+
+* More information is available from the website 
+http://groupware.les.inf.puc-rio.br/har especially on the section for the Weight Lifting Exercise Dataset. 
